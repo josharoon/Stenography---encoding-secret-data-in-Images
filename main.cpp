@@ -16,8 +16,11 @@ const char* keys =
         "{ help  h| | Print help message. }"
         "{ @input1 | Images/carriers/grayscale_carrier-01.png  | carrier}"
         "{ message |  Images/messages/message1.png |  message  }"
-        "{ encode | false  | set to true if decoding an image }"
-        "{ password |   | user supplied password }";
+        "{ encode | false  | set to true if encoding an image }"
+        "{ decode | false  | set to true if decoding an image }"
+        "{ password |   | user supplied password }"
+        "{ RGB | false  | read 3 channel RGB Image }"
+"{ noise | false  | add Gaussian Noise }";
 
 
 std::bitset<8> getBitset(unsigned char testvalue);
@@ -45,8 +48,8 @@ Mat_<PixelPos> getPposMat(int rows, int cols) {
     return pPos;
 }
 
-void makeKey(std::string &password, int rows, int cols, Mat_<PixelPos> &pPos) {
-    unsigned long djb2Hash= djb2_hash((unsigned char*)password.data());
+void makeKey(std::string &password, int rows, int cols, Mat_<PixelPos> &pPos, unsigned long hash) {
+    unsigned long djb2Hash= hash;
     for(int r=0;r < rows;  r++){
         for(int c=0;c < cols;  c++){
             int newR = RNG(djb2Hash + r*c ).uniform(0, rows);
@@ -66,33 +69,54 @@ void encrypt(Mat_<PixelPos> &imageKey, Mat &scramMess) {
 
 int main(int argc, char** argv){
 
+    // Parse Command Line and Load Images
+
     CommandLineParser parser(argc, argv, keys);
     fs::path inpath = parser.get<String>("@input1"); //bring in as a fs::path so we deduce a suitable output.
+    bool encode = parser.get<bool>("encode");
+    bool decode = parser.get<bool>("decode");
+    bool noise = parser.get<bool>("noise");
+    bool rgb = parser.get<bool>("RGB");
+
     Mat Carrier = imread(inpath.string(), IMREAD_GRAYSCALE ) ;
     Mat Message=Mat::zeros(Carrier.size(),CV_8UC1);
-    Mat encoded, decoded;
-    Message.copyTo(decoded);
 
-    // if encrypting
-
-    bool encode = parser.get<bool>("encode");
     Message =  imread(parser.get<String>("message"),  IMREAD_GRAYSCALE ) ;
     std::string  password = parser.get<std::string >("password");
 
+
+    //setup generic windows
+    std::string windowName1;
+    std::string windowName2;
+    std::string windowName3;
+
+    //set up Necessary Matrices.
+        unsigned long hash = djb2_hash((unsigned char *) password.data());
+        RNG  rGen=RNG(hash);
+    Mat encoded, decoded;
+    Message.copyTo(decoded);
         int rows = Carrier.rows;
         int cols = Carrier.cols;
         Mat_<PixelPos> pPos = getPposMat(rows, cols);
     if(password.size()!=0){
-        //Mat scramMess = Message.clone();
-        makeKey(password, rows, cols, pPos);
+
+        makeKey(password, rows, cols, pPos, hash);
 
     }
 
 
-
-
-
-    // if encoded
+    if(noise) {
+        windowName2 = "Carrier";
+        namedWindow(windowName2, 1);
+        imshow(windowName2, Carrier);
+        Carrier.forEach<uint8_t>([&](uint8_t &pixel, const int position[]) -> void {
+           pixel+=rGen.gaussian(0.5);
+        });
+            windowName3 = "Noise";
+            namedWindow(windowName3, 1);
+            imshow(windowName3, Carrier);
+    }
+    // execute Image processing, display and write results.
         Carrier.copyTo(encoded);
     if(encode == true) {
         //Message =  imread(parser.get<String>("message"),  IMREAD_GRAYSCALE ) ;
@@ -102,28 +126,28 @@ int main(int argc, char** argv){
         coder(Message, encoded, decoded, false, inpath);
         write(encoded, inpath, false);
 
-        const std::string windowName1 = "Message";
-        const std::string windowName2 = "Encoded";
+        windowName1 = "Message";
+        windowName2 = "Encoded";
         namedWindow(windowName1, 1);
         namedWindow(windowName2, 1);
         imshow(windowName1, Message);
         imshow(windowName2, encoded);
-    }else{
-        const std::string decryptMessage = "Message";
-        const std::string cryptMessage = "CryptMessage";
-        const std::string CarrierWin = "carrier";
-        namedWindow(decryptMessage, 1);
-        namedWindow(cryptMessage, 1);
-        namedWindow(CarrierWin, 1);
+    }else if(decode == true){
+        windowName1 = "Message";
+        windowName2 = "CryptMessage";
+        windowName3  = "carrier";
+        namedWindow(windowName1, 1);
+        namedWindow(windowName2, 1);
+        namedWindow(windowName3, 1);
 
         coder(Message, encoded, decoded, true, inpath);
-        imshow(cryptMessage, decoded);
+        imshow(windowName2, decoded);
         if(password.size()!=0){
             decrypt(pPos, decoded);
         }
         write(decoded, inpath, true);
-        imshow(decryptMessage, decoded);
-        imshow(CarrierWin, Carrier);
+        imshow(windowName1, decoded);
+        imshow(windowName3, Carrier);
     }
 
 
