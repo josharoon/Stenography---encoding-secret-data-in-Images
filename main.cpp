@@ -23,13 +23,13 @@ const char* keys =
         "{ encode | false  | set to true if encoding an image }"
         "{ decode | false  | set to true if decoding an image }"
         "{ password |   | user supplied password }"
-        "{ RGB | false  | read 3 channel RGB Image }"
+        "{ rgb | false  | read 3 channel RGB Image }"
 "{ noise | false  | add Gaussian Noise }";
 
 
 std::bitset<8> getBitset(unsigned char testvalue);
 void coder(Mat &Message, Mat &encoded, Mat &decoded, bool decode, fs::path inpath);
-void write(Mat &outfile,fs::path p,bool decode);
+void write(Mat &outfile, fs::path p);
 unsigned long djb2_hash(unsigned char *str);
 typedef cv::Point2i PixelPos;
 
@@ -171,28 +171,20 @@ int main(int argc, char** argv){
     bool encode = parser.get<bool>("encode");
     bool decode = parser.get<bool>("decode");
     bool noise = parser.get<bool>("noise");
-    bool rgb = parser.get<bool>("RGB");
+    bool rgb = parser.get<bool>("rgb");
+
+    std::string  password = parser.get<std::string >("password");
+    String txtMessage="";
 
     //setup rand generator
-    std::string  password = parser.get<std::string >("password");
     unsigned long hash = djb2_hash((unsigned char *) password.data());
     RNG  rGen=RNG(hash);
-    String txtMessage="";
     //Read carrier as greyscale or Color.
     ImreadModes flags = IMREAD_GRAYSCALE;
-    //handle RGB case
-    if(rgb){flags=cv::IMREAD_COLOR;
-
-
-
-
-    }
+    if(rgb)flags=cv::IMREAD_COLOR;
     Mat Carrier = imread(inpath.string(), flags) ;
 
-
-
-    //read message Image
-
+    //read message Image if encoding
     Mat Message=Mat::zeros(Carrier.size(),CV_8UC1);
     Mat Message2=Message.clone();
     if(parser.get<String>("message")!="") Message =  imread(parser.get<String>("message"),  IMREAD_GRAYSCALE ) ;
@@ -201,29 +193,18 @@ int main(int argc, char** argv){
         txt2Message(Message, txtMessage);
     }
 
-    //read message Text file
-
-
-    // convert string to binary.
-    // add string to message matrix.
-
-
-
-
-
     //setup generic windows
     std::string windowName1;
     std::string windowName2;
     std::string windowName3;
-
-
-
 
     //set up Necessary Matrices.
     Mat encoded, decoded;
     Message.copyTo(decoded);
         int rows = Carrier.rows;
         int cols = Carrier.cols;
+
+    //make look up matrix for greyscale encoding
         Mat_<PixelPos> pPos = getPposMat(rows, cols);
     if(password.size()!=0){
 
@@ -231,37 +212,23 @@ int main(int argc, char** argv){
 
     }
 
-    windowName1  = "message";
-    namedWindow(windowName1, 1);
-    imshow(windowName1, Message);
-
-
-
     //encode decode into RGB images.
     if(encode && rgb ) {
         encodeRGB(password, rows, cols, Message, hash, Carrier);
-        write(Carrier, inpath,false);
+        write(Carrier, fs::path((inpath.stem() += "_encoded") += inpath.extension()));
     }
 
-    windowName3  = "carrier";
-    namedWindow(windowName3, 1);
-    imshow(windowName3, Carrier);
-
-    if(decode && rgb )decodeRGB(password, rows, cols, Message2, hash, Carrier);
-
-
-    windowName2  = "message decoded";
-    namedWindow(windowName2, 1);
-    imshow(windowName2, Message2);
-
-    if(outTxt !="") {  //convert text message into Mat for RGB encoding.
-        Message2Txt(Message2, txtMessage);
-        Message2File(txtMessage, outTxt);
+    if(decode && rgb ) {
+        decodeRGB(password, rows, cols, Message2, hash, Carrier);
+        // if working with text files output to text file.
+        if (outTxt != "") {  //convert text message into Mat for RGB encoding.
+            Message2Txt(Message2, txtMessage);
+            Message2File(txtMessage, outTxt);
+        }else {
+            write(Message2, fs::path((inpath.stem() += "_decoded") += inpath.extension()));
+        }
     }
-
-
-
-
+    // add noise to carrier Image
     if(noise) {
         windowName2 = "Carrier";
         namedWindow(windowName2, 1);
@@ -269,43 +236,43 @@ int main(int argc, char** argv){
         Carrier.forEach<uint8_t>([&](uint8_t &pixel, const int position[]) -> void {
            pixel+=rGen.gaussian(0.5);
         });
-            windowName3 = "Noise";
-            namedWindow(windowName3, 1);
-            imshow(windowName3, Carrier);
+        windowName3 = "Noise";
+        namedWindow(windowName3, 1);
+        imshow(windowName3, Carrier);
+        write(Carrier, fs::path((inpath.stem() += "_noise") += inpath.extension()));
+
     }
     // execute Image processing, display and write results.
         Carrier.copyTo(encoded);
+    //handle greyscale encoding and decoding
     if(encode == true && !rgb) {
         //Message =  imread(parser.get<String>("message"),  IMREAD_GRAYSCALE ) ;
         if(password.size()!=0){
             encrypt(pPos, Message);
         }
         coder(Message, encoded, decoded, false, inpath);
-        write(encoded, inpath, false);
-
+        write(encoded, fs::path((inpath.stem() += "_encoded") += inpath.extension()));
+        bitwise_not(Message,Message);
         windowName1 = "Message";
         windowName2 = "Encoded";
         namedWindow(windowName1, 1);
         namedWindow(windowName2, 1);
         imshow(windowName1, Message);
         imshow(windowName2, encoded);
-    }else if(decode == true && !rgb){
-        windowName1 = "Message";
-        windowName2 = "CryptMessage";
-        windowName3  = "carrier";
-        namedWindow(windowName1, 1);
-        namedWindow(windowName2, 1);
-        namedWindow(windowName3, 1);
+    }
+
+    if(decode == true && !rgb){
 
         coder(Message, encoded, decoded, true, inpath);
-        imshow(windowName2, decoded);
         if(password.size()!=0){
             decrypt(pPos, decoded);
         }
-        write(decoded, inpath, true);
+        windowName1 = "DeCryptMessage";
+        write(decoded, fs::path((inpath.stem() += "_decoded") += inpath.extension()));
         imshow(windowName1, decoded);
-        imshow(windowName3, Carrier);
     }
+
+    std::cout << "Press any key to Finish";
     char c = (char)waitKey(0);
     return  0;
 
@@ -315,6 +282,11 @@ void txt2Message(Mat &MessageMat, String &MessageStr) {
     int bytes=MessageStr.length();
     //calculate capacity of  RGB image of same size as MessageMat in bytes
     int MessCapacity=(MessageMat.rows*MessageMat.cols*3)/8;
+    // Handle case where Message is too big to encode in Image.
+    if(bytes>=MessCapacity){
+        std::cout << "message to big for Image.  Max size (bytes) allowed =" <<  MessCapacity-1;
+        return;
+    }
     // reserve first 8 bits to encode message length up to 255 bytes (0 represents 1 byte).
     std::bitset<8> bytesAsbits=getBitset(bytes);
     for(int bit=0 ; bit < 8 ; bit ++){
@@ -413,16 +385,9 @@ std::bitset<8> getBitset(unsigned char testvalue) {
     return pixel;
 }
 
-void write(Mat &outfile, fs::path p, bool decode) {
-
-    std::string suffix="_encoded";
-    if(decode)suffix="_decoded";
-
-    fs::path outpath=p.stem()+=suffix;
-    outpath+=p.extension();
-    std::cout << "writing" << outpath.string() << std::endl;
-    imwrite(outpath.string(),outfile);
-
+void write(Mat &outfile, fs::path p) {
+    std::cout << "writing" << p.string() << std::endl;
+    imwrite(p.string(),outfile);
 }
 
 //  http://www.cse.yorku.ca/~oz/hash.html   the function djb2_hash code has been taken from here.
