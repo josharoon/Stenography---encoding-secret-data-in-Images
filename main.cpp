@@ -17,6 +17,7 @@ namespace fs= std::filesystem;
 const char* keys =
         "{ help  h| | Print help message. }"
         "{ @input1 | Images/carriers/grayscale_carrier-01.png  | carrier}"
+        "{ diff | Images/carriers/grayscale_carrier-01.png  | takes difference between file and carrier}"
         "{ message |   | image  message  }"
         "{ txt |   |  input text File  }"
         "{ outtxt |   |  output text File  }"
@@ -187,12 +188,6 @@ int main(int argc, char** argv){
     //read message Image if encoding
     Mat Message=Mat::zeros(Carrier.size(),CV_8UC1);
     Mat Message2=Message.clone();
-    if(parser.get<String>("message")!="") Message =  imread(parser.get<String>("message"),  IMREAD_GRAYSCALE ) ;
-    if(parser.get<String>("txt")!="") {  //convert text message into Mat for RGB encoding.
-        txtMessage = getTxtFile(textPath);
-        txt2Message(Message, txtMessage);
-    }
-
     //setup generic windows
     std::string windowName1;
     std::string windowName2;
@@ -205,7 +200,16 @@ int main(int argc, char** argv){
         int cols = Carrier.cols;
 
     //make look up matrix for greyscale encoding
-        Mat_<PixelPos> pPos = getPposMat(rows, cols);
+    Mat_<PixelPos> pPos = getPposMat(rows, cols);
+
+    //Handle different command line options.
+
+    if(parser.get<String>("message")!="") Message =  imread(parser.get<String>("message"),  IMREAD_GRAYSCALE ) ;
+    if(parser.get<String>("txt")!="") {  //convert text message into Mat for RGB encoding.
+        txtMessage = getTxtFile(textPath);
+        txt2Message(Message, txtMessage);
+    }
+
     if(password.size()!=0){
 
         makeKey(password, rows, cols, pPos, hash);
@@ -283,13 +287,13 @@ void txt2Message(Mat &MessageMat, String &MessageStr) {
     //calculate capacity of  RGB image of same size as MessageMat in bytes
     int MessCapacity=(MessageMat.rows*MessageMat.cols*3)/8;
     // Handle case where Message is too big to encode in Image.
-    if(bytes>=MessCapacity){
+    if(bytes>MessCapacity-3){
         std::cout << "message to big for Image.  Max size (bytes) allowed =" <<  MessCapacity-1;
         return;
     }
     // reserve first 8 bits to encode message length up to 255 bytes (0 represents 1 byte).
-    std::bitset<8> bytesAsbits=getBitset(bytes);
-    for(int bit=0 ; bit < 8 ; bit ++){
+    std::bitset<24> bytesAsbits(bytes);
+    for(int bit=0 ; bit < 24 ; bit ++){
         int col = bit % MessageMat.rows;
         int row = bit / MessageMat.rows;
         int MessageVal = bytesAsbits[bit];
@@ -313,8 +317,8 @@ void txt2Message(Mat &MessageMat, String &MessageStr) {
 
 void Message2Txt(Mat &MessageMat, String &MessageStr){
     //get length of message in bytes
-    std::bitset<8> bytes;
-    for(int bit=0 ; bit < 8 ; bit ++) {
+    std::bitset<24> bytes;
+    for(int bit=0 ; bit < 24 ; bit ++) {
         int col = bit % MessageMat.rows;
         int row = bit / MessageMat.rows;
         bytes[bit] = MessageMat.at<uint8_t>(row, col);
@@ -322,7 +326,7 @@ void Message2Txt(Mat &MessageMat, String &MessageStr){
     //loop through Message matrix converting each 8 bits into characters and adding them to message string.
     int MessLength = (int) bytes.to_ulong();
     std::bitset<8> character;
-    int bitCount=8; //assume message length is stored in 8 bits.
+    int bitCount=24; //assume message length is stored in 8 bits.
     for(int i=0; i < MessLength; i++){
         for(int bit=bitCount ; bit < bitCount+8 ; bit ++) {
 
@@ -404,9 +408,8 @@ unsigned long djb2_hash(unsigned char *str) {
 }
 
 void Message2File(String &Message, fs::path p= "test.txt") {
-
-
-    std::ofstream out(p);
+    //use of the binary flag to avoid formatting differences using text files.
+    std::ofstream out(p, std::ios::binary);
     out << Message;
     out.close();
 
