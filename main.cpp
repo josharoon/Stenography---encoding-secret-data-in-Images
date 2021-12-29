@@ -17,7 +17,7 @@ namespace fs= std::filesystem;
 const char* keys =
         "{ help  h| | Print help message. }"
         "{ @input1 | Images/carriers/grayscale_carrier-01.png  | carrier}"
-        "{ diff | Images/carriers/grayscale_carrier-01.png  | takes difference between file and carrier}"
+        "{ diff |   | takes difference between file and carrier}"
         "{ message |   | image  message  }"
         "{ txt |   |  input text File  }"
         "{ outtxt |   |  output text File  }"
@@ -168,6 +168,7 @@ int main(int argc, char** argv){
     fs::path inpath = parser.get<String>("@input1"); //bring in as a fs::path so we deduce a suitable output.
     fs::path textPath=parser.get<String>("txt");
     fs::path outTxt=parser.get<String>("outtxt");
+    fs::path diffPath = parser.get<String>("diff");
 
     bool encode = parser.get<bool>("encode");
     bool decode = parser.get<bool>("decode");
@@ -184,6 +185,12 @@ int main(int argc, char** argv){
     ImreadModes flags = IMREAD_GRAYSCALE;
     if(rgb)flags=cv::IMREAD_COLOR;
     Mat Carrier = imread(inpath.string(), flags) ;
+    //Get dofference between 2 images
+    if(diffPath !=""){
+        Mat Diff = imread(diffPath.string(), flags) ;
+        absdiff(Carrier,Diff,Diff);
+        write(Diff,fs::path((inpath.stem()+=diffPath.stem()  += "_diff") += inpath.extension()));
+    }
 
     //read message Image if encoding
     Mat Message=Mat::zeros(Carrier.size(),CV_8UC1);
@@ -209,6 +216,8 @@ int main(int argc, char** argv){
         txtMessage = getTxtFile(textPath);
         txt2Message(Message, txtMessage);
     }
+
+
 
     if(password.size()!=0){
 
@@ -249,7 +258,7 @@ int main(int argc, char** argv){
     // execute Image processing, display and write results.
         Carrier.copyTo(encoded);
     //handle greyscale encoding and decoding
-    if(encode == true && !rgb) {
+    if(encode  && !rgb) {
         //Message =  imread(parser.get<String>("message"),  IMREAD_GRAYSCALE ) ;
         if(password.size()!=0){
             encrypt(pPos, Message);
@@ -265,7 +274,7 @@ int main(int argc, char** argv){
         imshow(windowName2, encoded);
     }
 
-    if(decode == true && !rgb){
+    if(decode  && !rgb){
 
         coder(Message, encoded, decoded, true, inpath);
         if(password.size()!=0){
