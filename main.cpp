@@ -10,7 +10,7 @@
 #include <string>
 
 
-using namespace cv; // OpenCV API is in the C++ "cv" namespace
+using namespace cv;
 namespace fs= std::filesystem;
 
 
@@ -20,7 +20,9 @@ const char* keys =
         "{ diff |   | takes difference between file and carrier}"
         "{ message |   | image  message  }"
         "{ txt |   |  input text File  }"
+        "{ bin |   |  input generic binary File  }"
         "{ outtxt |   |  output text File  }"
+        "{ outbin |   |  output generic binary File  }"
         "{ encode | false  | set to true if encoding an image }"
         "{ decode | false  | set to true if decoding an image }"
         "{ password |   | user supplied password }"
@@ -35,11 +37,13 @@ unsigned long djb2_hash(unsigned char *str);
 typedef cv::Point2i PixelPos;
 
 void swapPix(Mat_<PixelPos> &ImageKey, Mat &scramMess, int r, int c);
-
 void txt2Message(Mat &MessageMat, String &MessageStr);
 void Message2Txt(Mat &MessageMat, String &MessageStr);
+void Message2Bin(Mat &MessageMat,  std::vector<char> &MessageVec);
 void Message2File(String &Message, fs::path p);
 
+void bin2Message(Mat &MessageMat, std::vector<char> &MessageVec);
+void bin2File(std::vector<char> &Message, fs::path p);
 void decrypt(Mat_<PixelPos> &keyMat, Mat &encodImage) {
     for(int r= keyMat.rows - 1; r >= 0; r--){
         for(int c= keyMat.cols - 1; c >= 0; c--){
@@ -152,6 +156,18 @@ String getTxtFile(fs::path filename)
 }
 
 
+std::vector<char> getPdfFile(fs::path filename)
+{
+    std::ifstream in(filename, std::ios::in | std::ios::binary);
+    if (in)
+    {
+        std::vector<char> pdf= (std::vector<char>((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>()));
+        return pdf;
+    }
+    throw(errno);
+}
+
+
 
 void encrypt(Mat_<PixelPos> &imageKey, Mat &scramMess) {
     for(int r=0; r < imageKey.rows; r++){
@@ -167,7 +183,9 @@ int main(int argc, char** argv){
     CommandLineParser parser(argc, argv, keys);
     fs::path inpath = parser.get<String>("@input1"); //bring in as a fs::path so we deduce a suitable output.
     fs::path textPath=parser.get<String>("txt");
+    fs::path binPath=parser.get<String>("bin");
     fs::path outTxt=parser.get<String>("outtxt");
+    fs::path outBin=parser.get<String>("outbin");
     fs::path diffPath = parser.get<String>("diff");
 
     bool encode = parser.get<bool>("encode");
@@ -177,6 +195,7 @@ int main(int argc, char** argv){
 
     std::string  password = parser.get<std::string >("password");
     String txtMessage="";
+    std::vector<char> binMessage={};
 
     //setup rand generator
     unsigned long hash = djb2_hash((unsigned char *) password.data());
@@ -216,6 +235,10 @@ int main(int argc, char** argv){
         txtMessage = getTxtFile(textPath);
         txt2Message(Message, txtMessage);
     }
+    if(parser.get<String>("bin")!="") {  //convert text message into Mat for RGB encoding.
+        std::vector<char> binMessage = getPdfFile(binPath);
+        bin2Message(Message, binMessage);
+    }
 
 
 
@@ -236,7 +259,10 @@ int main(int argc, char** argv){
         // if working with text files output to text file.
         if (outTxt != "") {  //convert text message into Mat for RGB encoding.
             Message2Txt(Message2, txtMessage);
-            Message2File(txtMessage, outTxt);
+            Message2File(txtMessage, outTxt);}
+            else if(outBin!= ""){
+            Message2Bin(Message2, binMessage);
+           bin2File(binMessage, outBin);
         }else {
             write(Message2, fs::path((inpath.stem() += "_decoded") += inpath.extension()));
         }
@@ -322,6 +348,8 @@ void txt2Message(Mat &MessageMat, String &MessageStr) {
         bitCount+=8;
     }
 }
+
+
 
 
 void Message2Txt(Mat &MessageMat, String &MessageStr){
@@ -427,3 +455,95 @@ void Message2File(String &Message, fs::path p= "test.txt") {
 
 
 }
+
+void bin2Message(Mat &MessageMat, std::vector<char> &MessageVec) {
+    int bytes=MessageVec.size();
+    //calculate capacity of  RGB image of same size as MessageMat in bytes
+    int MessCapacity=(MessageMat.rows*MessageMat.cols*3)/8;
+    // Handle case where Message is too big to encode in Image.
+    const int headSize = 24;
+    if(bytes >= MessCapacity - headSize){
+        std::cout << "message to big for Image.  Max size (bytes) allowed =" <<  MessCapacity-headSize;
+        return;
+    }
+
+    std::vector<int> bits; //1d array of all bits to encode
+    std::bitset<headSize> bytesAsbits(bytes);
+    for(int i=0; i<headSize;i++)bits.push_back(bytesAsbits[i]); //encode message size at header of 1d/array
+
+    //encode rest of message into 1 d array.
+    for(int i=0; i< MessageVec.size();i++){
+        std::bitset<8> c(MessageVec[i]);
+        for(int bit=0;bit <8; bit++)bits.push_back(c[bit]);
+    }
+    for(int i=0;i<MessageMat.rows;i++)
+        for(int j=0;j<MessageMat.cols;j++) {
+            auto i1 = i * MessageMat.cols + j;
+
+            if(i1==bits.size()){
+                return;
+            }
+            MessageMat.at<uint8_t>(i, j)=bits[i1];
+        }
+
+
+
+}
+
+
+
+
+void Message2Bin(Mat &MessageMat, std::vector<char> &MessageVec) {
+
+    int MessLength =0;
+    const int headSize = 24;
+    std::bitset<headSize> bytes;
+    std::vector<int> bits; //1d array to place bit message in.
+    std::bitset<headSize> messSize;
+    int bitcount=0;
+    int endbit=0;
+    //loop through message to extract binary information
+    for(int i = 0; i < MessageMat.rows; i++)
+        for(int j = 0; j< MessageMat.cols; j++)
+
+        {
+            if(bitcount<headSize) {
+                bytes[bitcount] = MessageMat.at<uint8_t>(i, j);
+            }
+            if(bitcount==headSize) { //extract header from matrix.
+                MessLength = (int) bytes.to_ulong();//get message length as bytes.
+                endbit=(MessLength*8+headSize);
+            }
+            bits.push_back( MessageMat.at<uint8_t>(i, j));
+            bitcount++;
+            if(bitcount==endbit){
+                goto encodeVector;
+            }
+        }
+    encodeVector:
+    std::bitset<8> character;
+    int bitStart=0;
+    //run through are bit vector converting it to char and adding to message vector.
+    for (int i=headSize-1; i < bits.size(); i +=8) {
+        for (int j = 0; j < 8; j++) {
+            character[j] = bits[bitStart];
+            bitStart++;
+        }
+        MessageVec.push_back((int) character.to_ullong());
+    }
+
+
+
+
+
+
+}
+
+void bin2File(std::vector<char> &Message, fs::path p) {
+    //use of the binary flag to avoid formatting differences using text files.
+    std::ofstream out(p, std::ios::binary);
+    for (char c: Message)out << c;
+    out.close();
+}
+
+
